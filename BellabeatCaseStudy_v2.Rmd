@@ -1,0 +1,229 @@
+---
+title: "Bellabeat Case Study: A Strategic Analysis"
+author: "YH"
+date: "July 17, 2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# This chunk loads all necessary libraries for the analysis.
+# 'include=FALSE' means this code chunk will run, but won't be shown in the final report.
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(lubridate)
+library(janitor)
+```
+
+# 1. Ask
+
+This section defines the business objective and the key questions driving this analysis. The goal is to translate insights from non-Bellabeat smart device data into actionable marketing strategies for Bellabeat.
+
+### 1.1 Guiding Questions
+
+1.  **What are the key trends and user behaviors in smart device usage?**
+2.  **How could these trends apply to Bellabeat's user base?**
+3.  **How can these insights influence Bellabeat's marketing strategy?**
+  
+### 1.2 Project Objective (Refinement 1)
+
+**To analyze third-party fitness tracker data to deliver data-driven recommendations that guide Bellabeat's future marketing strategy.**
+
+### 1.3 Key Stakeholders
+
+*   **Urška Sršen**: Cofounder and Chief Creative Officer
+*   **Sando Mur**: Cofounder and Mathematician
+*   **Bellabeat Marketing Analytics Team**
+
+# 2. Prepare
+
+This phase involves sourcing, loading, and assessing the data. The data is the **FitBit Fitness Tracker Data** from Kaggle, containing data from thirty Fitbit users over a 31-day period.
+
+### 2.1 Loading Data
+
+```{r load_data}
+daily_activity <- read_csv("FitBit_Fitness_Tracker_Data/mturkfitbit_export_4.12.16-5.12.16/Fitabase Data 4.12.16-5.12.16/dailyActivity_merged.csv")
+daily_sleep <- read_csv("FitBit_Fitness_Tracker_Data/mturkfitbit_export_4.12.16-5.12.16/Fitabase Data 4.12.16-5.12.16/sleepDay_merged.csv")
+```
+
+### 2.2 Quantifying the Sample (Refinement 2)
+Before proceeding, let's confirm the number of unique participants in our datasets. This is a critical first step for understanding the scope of the data.
+
+```{r count_participants}
+n_participants_activity <- n_distinct(daily_activity$Id)
+n_participants_sleep <- n_distinct(daily_sleep$Id)
+
+cat("Number of unique participants in activity data:", n_participants_activity, "\n")
+cat("Number of unique participants in sleep data:", n_participants_sleep, "\n")
+```
+*The analysis is based on approximately 30 users, which is a small sample size. This will be noted in the limitations.*
+
+### 2.3 Data Limitations (ROCCC Assessment)
+
+*   **Reliable:** **Low.** The data comes from only ~30 users, which is not a representative sample. Findings are directional.
+*   **Original:** **No.** This is third-party data from Kaggle.
+*   **Comprehensive:** **Medium.** Lacks key Bellabeat metrics like stress, nutrition, and menstrual cycles.
+*   **Current:** **Low.** Data is from 2016. User behaviors have likely changed.
+*   **Cited:** **Yes.** Data is publicly available but lacks detailed collection methodology.
+
+# 3. Process
+
+This phase cleans and transforms the data for analysis. This includes standardizing column names, formatting dates, removing duplicates, merging datasets, and engineering new features.
+
+### 3.1 Standardizing Column Names & Formatting Dates
+
+```{r clean_and_format}
+daily_activity <- clean_names(daily_activity)
+daily_sleep <- clean_names(daily_sleep)
+
+daily_activity$activity_date <- as.Date(daily_activity$activity_date, format="%m/%d/%Y")
+daily_sleep$sleep_day <- as.Date(daily_sleep$sleep_day, format="%m/%d/%Y")
+```
+
+### 3.2 Checking for Duplicates and NAs
+
+```{r check_duplicates_na}
+daily_activity <- daily_activity %>% distinct()
+daily_sleep <- daily_sleep %>% distinct()
+```
+
+### 3.3 Merging Datasets & Feature Engineering (Refinement 3)
+
+We merge the two main datasets to analyze relationships between activity and sleep. We will also engineer a `day_of_week` feature here to centralize all data processing steps.
+
+```{r merge_and_feature_engineer}
+daily_activity <- daily_activity %>% rename(date = activity_date)
+daily_sleep <- daily_sleep %>% rename(date = sleep_day)
+
+activity_sleep_merged <- merge(daily_activity, daily_sleep, by=c("id", "date"))
+
+# Add 'day_of_week' feature
+activity_sleep_merged$day_of_week <- wday(activity_sleep_merged$date, label = TRUE)
+
+head(activity_sleep_merged)
+```
+
+# 4. Analyze
+
+This phase explores the processed data to uncover insights through summary statistics, relationship analysis, and user segmentation.
+
+### 4.1 Summary Statistics
+
+```{r summary_stats}
+activity_sleep_merged %>%
+  select(total_steps, total_distance, sedentary_minutes, total_minutes_asleep) %>%
+  summary()
+```
+
+### 4.2 Exploring Relationships
+
+```{r analyze_relationships}
+# Relationship between steps and calories
+ggplot(data = activity_sleep_merged, aes(x = total_steps, y = calories)) +
+  geom_point(color = "purple", alpha = 0.5) +
+  geom_smooth(method = "loess") +
+  labs(title = "Total Steps vs. Calories Burned", x = "Total Steps", y = "Calories Burned")
+
+# Relationship between time in bed and time asleep
+ggplot(data = activity_sleep_merged, aes(x = total_time_in_bed, y = total_minutes_asleep)) +
+  geom_point(color = "orange", alpha = 0.5) +
+  geom_abline(slope = 1, intercept = 0, color="blue") +
+  labs(title = "Time in Bed vs. Time Asleep", x = "Total Time in Bed (Minutes)", y = "Total Minutes Asleep")
+```
+
+### 4.3 User Segmentation by Activity Level (Refinement 4)
+To better understand our users, we can segment them based on their average daily steps. This provides a more nuanced view than looking at the population as a whole. (Using CDC guidelines: <5,000=Sedentary, 5,000-7,499=Lightly Active, >7,500=Active).
+
+```{r segment_users}
+user_avg_steps <- activity_sleep_merged %>%
+  group_by(id) %>%
+  summarise(avg_steps = mean(total_steps)) %>%
+  mutate(user_type = case_when(
+    avg_steps < 5000 ~ "Sedentary",
+    avg_steps >= 5000 & avg_steps < 7500 ~ "Lightly Active",
+    avg_steps >= 7500 ~ "Active"
+  ))
+
+# Show the percentage of users in each segment
+user_segment_summary <- user_avg_steps %>%
+  group_by(user_type) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+ggplot(user_segment_summary, aes(x = "", y = percentage, fill = user_type)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = paste0(round(percentage), "%")), position = position_stack(vjust = 0.5)) +
+  labs(title = "User Segmentation by Activity Level", fill = "User Type", x = NULL, y = NULL) +
+  theme_void()
+```
+
+# 5. Share
+
+This section communicates the key findings from the analysis, supported by clear visualizations.
+
+### Finding 1: Users are Largely Sedentary
+
+The average user spends the vast majority of their day (about 81%) being sedentary. This presents a major opportunity for features that encourage movement.
+
+```{r visualize_activity_levels_pie, fig.width=8, fig.height=6}
+# Calculate average minutes for each activity level
+avg_minutes <- activity_sleep_merged %>%
+  summarise(
+    Sedentary = mean(sedentary_minutes),
+    `Lightly Active` = mean(lightly_active_minutes),
+    `Fairly Active` = mean(fairly_active_minutes),
+    `Very Active` = mean(very_active_minutes)
+  ) %>%
+  gather(key = "activity_level", value = "average_minutes") %>%
+  mutate(activity_level = factor(activity_level, levels = c("Very Active", "Fairly Active", "Lightly Active", "Sedentary")))
+
+# Create the pie chart (Refinement 5)
+ggplot(data = avg_minutes, aes(x = "", y = average_minutes, fill = activity_level)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_text(aes(label = paste0(round(average_minutes / sum(average_minutes) * 100), "%")),
+            position = position_stack(vjust = 0.5)) +
+  labs(title = "Proportion of Day Spent in Each Activity Level",
+       subtitle = "Sedentary behavior dominates the average user's day",
+       fill = "Activity Level",
+       x = NULL, y = NULL) +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5, size=16),
+        plot.subtitle = element_text(hjust = 0.5, size=12))
+```
+
+### Finding 2: Inefficient Sleep is Common
+The analysis of time in bed versus time asleep shows that many data points fall below the 1:1 line, indicating users spend time in bed awake. This suggests an opportunity to help users improve their sleep quality.
+
+### Finding 3: Activity Patterns Vary by Day
+By analyzing total steps by the day of the week, we can see potential patterns, such as higher activity on weekends.
+
+```{r analyze_day_of_week}
+ggplot(data = activity_sleep_merged, aes(x = day_of_week, y = total_steps, fill = day_of_week)) +
+  geom_boxplot() + # A boxplot is better to show distribution
+  labs(title = "Distribution of Steps by Day of the Week",
+       x = "Day of the Week",
+       y = "Total Steps") +
+  theme(legend.position = "none")
+```
+
+# 6. Act
+
+Based on the analysis, here are three high-level recommendations for Bellabeat's marketing strategy.
+
+### Recommendation 1: Launch a Targeted "Mindful Movement" Campaign (Refinement 6)
+
+*   **The Insight:** Users are sedentary for over 16 hours a day on average, and our segmentation shows a significant portion of users fall into the "Sedentary" category.
+*   **The Recommendation:** Launch a targeted marketing campaign and in-app feature called "Mindful Movement." This feature would send smart, encouraging notifications to users in the "Sedentary" segment to take short walks or stretch.
+*   **Business Impact:** The campaign's success will be measured via an A/B test. **The goal is to achieve a 15% reduction in average daily sedentary minutes for the test group over a 3-month pilot.** This would directly address a core health concern and increase user engagement with the Bellabeat app and devices.
+
+### Recommendation 2: Focus on Sleep Quality, Not Just Duration
+
+*   **The Insight:** Users often spend significant time in bed without being asleep, indicating poor sleep efficiency.
+*   **The Recommendation:** Enhance the Bellabeat app with content about sleep hygiene. Marketing should position Bellabeat not just as a sleep tracker, but as a "sleep coach" that provides actionable advice.
+
+### Recommendation 3: Create Targeted Weekend and Weekday Content
+
+*   **The Insight:** Activity patterns can vary across the week.
+*   **The Recommendation:** Develop targeted content and app notifications for weekdays versus weekends. For example, weekday content could focus on "office wellness," while weekend content could promote longer, more intensive activities.
